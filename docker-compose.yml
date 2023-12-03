@@ -1,0 +1,16 @@
+version: '3'
+
+services:
+  dev-db:
+    image: mysql:5.7
+    ports:
+      - "${DATABASE_PORT:?err}:3306"  # Default MySQL port
+    environment:
+      MYSQL_DATABASE: "${DATABASE_NAME:?err}"
+      MYSQL_USER: "${DATABASE_USER:?err}"
+      MYSQL_PASSWORD: "${DATABASE_PASSWORD:?err}"
+      MYSQL_ROOT_PASSWORD: "${DATABASE_ROOT_PASSWORD:?err}"
+    networks:
+      - chat-apk
+networks:
+  chat-apk:
