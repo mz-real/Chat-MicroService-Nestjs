@@ -8,9 +8,18 @@ async function bootstrap() {
     .setTitle('Chat API')
     .setDescription('The Chat API description')
     .setVersion('1.0')
+    .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
-  await app.listen(3000);
+  SwaggerModule.setup('docs', app, document);
+
+  app.setGlobalPrefix('');
+
+  await app.listen(3002);
+
+  // Log application URL and Swagger documentation URL
+  console.log(`Application is running on: ${await app.getUrl()}`);
+  console.log(`Swagger documentation is available at: ${await app.getUrl()}/api`);
 }
+
 bootstrap();
