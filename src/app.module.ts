@@ -7,6 +7,9 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DB_TYPE } from './globals/enums';
 import { WsModule } from './ws/ws.module';
+import { WebSocketModule } from './websocket/websocket.module';
+import { UserModule } from './user/user.module';
+import { WebSocketGate } from './websocket/websocket.gateway';
 
 @Module({
   imports: [
@@ -30,8 +33,11 @@ import { WsModule } from './ws/ws.module';
     }),
     ChatModule,
     WsModule,
+    WebSocketModule,
+    UserModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, WebSocketGate],
+  exports: [WebSocketGate]
 })
 export class AppModule {}

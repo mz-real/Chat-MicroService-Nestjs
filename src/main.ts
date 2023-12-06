@@ -19,7 +19,7 @@ async function bootstrap() {
 
   // Log application URL and Swagger documentation URL
   console.log(`Application is running on: ${await app.getUrl()}`);
-  console.log(`Swagger documentation is available at: ${await app.getUrl()}/api`);
+  console.log(`Swagger documentation is available at: ${await app.getUrl()}/docs`);
 }
 
 bootstrap();

@@ -1,25 +1,19 @@
-import { Conversation } from 'src/conversation/entities/conversation.entity';
-import { WebSocketConnection } from 'src/websockeconnection/entities/websockeconnection.entity/websockeconnection.entity';
-import { Entity, PrimaryColumn, Column, OneToMany, ManyToMany, JoinTable } from 'typeorm';
-
+import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity()
 export class User {
-  @PrimaryColumn()
+  @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @Column({unique: true})
+  userId: string;
 
   @Column()
   email: string;
 
-  @Column()
+  @Column({enum: ['client', 'staff']})
   role: string;
 
-  @OneToMany(() => WebSocketConnection, (connection) => connection.user)
-  connections: WebSocketConnection[];
-
-  @ManyToMany(() => Conversation)
-  @JoinTable()
-  conversations: Conversation[];
-
-  // Other user-related fields and relationships
+  @Column({ default: 'offline', enum: ['offline', 'online']})
+  status: string;
 }

@@ -1,27 +1,22 @@
 import { Conversation } from 'src/conversation/entities/conversation.entity';
 import { User } from 'src/users/entities/user.entity';
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm';
-
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 
 @Entity()
 export class Message {
-  @PrimaryGeneratedColumn()
+  @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @ManyToOne(() => Conversation, conversation => conversation.messages)
+  conversation: Conversation;
+
+  @ManyToOne(() => User, user => user.userId)
+  sender: User;
 
   @Column()
   content: string;
 
-  @ManyToOne(() => User)
-  sender: User;
-
-  @ManyToOne(() => Conversation, (conversation) => conversation.messages)
-  conversation: Conversation;
-
-  @CreateDateColumn()
+  @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 
-  @UpdateDateColumn()
-  updatedAt: Date;
-
-  // Other message-related fields and relationships
 }

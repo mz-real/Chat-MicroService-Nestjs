@@ -10,8 +10,5 @@ export class WebSocketConnection {
   @Column()
   connectionId: string;
 
-  @ManyToOne(() => User, (user) => user.connections)
-  user: User;
-
 }
 
