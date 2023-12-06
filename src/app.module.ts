@@ -6,7 +6,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DB_TYPE } from './globals/enums';
-import { WsModule } from './ws/ws.module';
 import { WebSocketModule } from './websocket/websocket.module';
 import { UserModule } from './user/user.module';
 import { WebSocketGate } from './websocket/websocket.gateway';
@@ -32,7 +31,6 @@ import { WebSocketGate } from './websocket/websocket.gateway';
       inject: [ConfigService],
     }),
     ChatModule,
-    WsModule,
     WebSocketModule,
     UserModule,
   ],
