@@ -1,16 +1,35 @@
 version: '3'
 
 services:
+  app:
+    build: .
+    ports:
+      - "${APP_PORT}:${APP_PORT}"
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    depends_on:
+      - dev-db
+    environment:
+      DATABASE_HOST: "${DATABASE_HOST}"
+      DATABASE_PORT: "${DATABASE_PORT}"
+      JWT_SECRET: "${JWT_SECRET}"
+      WS_PORT: "${WS_PORT}"
+    networks:
+      - chat-apk
+    command: npm run start:dev
+
   dev-db:
     image: mysql:5.7
     ports:
-      - "${DATABASE_PORT:?err}:3306"  # Default MySQL port
+      - "${DB_PORT}:${MYSQL_PORT}"
     environment:
-      MYSQL_DATABASE: "${DATABASE_NAME:?err}"
-      MYSQL_USER: "${DATABASE_USER:?err}"
-      MYSQL_PASSWORD: "${DATABASE_PASSWORD:?err}"
-      MYSQL_ROOT_PASSWORD: "${DATABASE_ROOT_PASSWORD:?err}"
+      MYSQL_DATABASE: "${DATABASE_NAME}"
+      MYSQL_USER: "${DATABASE_USER}"
+      MYSQL_PASSWORD: "${DATABASE_PASSWORD}"
+      MYSQL_ROOT_PASSWORD: "${DATABASE_ROOT_PASSWORD}"
     networks:
       - chat-apk
+
 networks:
   chat-apk:

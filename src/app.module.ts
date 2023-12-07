@@ -26,7 +26,10 @@ import { WebSocketGate } from './websocket/websocket.gateway';
         password: configService.get('DATABASE_PASSWORD'),
         database: configService.get('DATABASE_NAME'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        synchronize: true, // turn this off in production
+        retryAttempts: 5,
+        retryDelay: 3000,
+        autoLoadEntities: true,
+        synchronize: true,
       }),
       inject: [ConfigService],
     }),

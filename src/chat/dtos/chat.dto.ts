@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsEmail, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsEmail, IsIn, ValidateNested } from 'class-validator';
 
 
 export class UserDto {
@@ -34,6 +35,8 @@ export class UserDto {
 export class CreateConversationDto {
   @IsArray()
   @IsNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => UserDto)
   @ApiProperty({
     description: 'Array of participant users',
     required: true,

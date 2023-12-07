@@ -13,6 +13,7 @@ import { Logger, OnModuleInit } from '@nestjs/common';
 import { UserService } from 'src/user/user.service';
 import { ChatService } from 'src/chat/service/chat.service';
 import { ConfigService } from '@nestjs/config';
+import { UserStatus } from 'src/users/entities/user.entity';
 
 interface JwtPayload {
   sub: string;
@@ -22,7 +23,7 @@ interface JwtPayload {
   exp: number;
 }
 
-@WebSocketGateway()
+@WebSocketGateway() 
 export class WebSocketGate implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit {
   @WebSocketServer()
   server: Server;
@@ -42,7 +43,6 @@ export class WebSocketGate implements OnGatewayConnection, OnGatewayDisconnect, 
 
   async handleConnection(@ConnectedSocket() client: Socket) {
     try {
-      this.logger.log('I am here');
       const token = client.handshake.query.token as string;
       const decoded = jwt.verify(token, this.configService.get('JWT_SECRET')) as JwtPayload;
       client.data = {
@@ -50,26 +50,37 @@ export class WebSocketGate implements OnGatewayConnection, OnGatewayDisconnect, 
         email: decoded.email,
         role: decoded.role,
       };
+      const user = await this.userService.findUserById(client.data.userId);
+      if (!user) {
+        await this.userService.createUser(
+          decoded.email,
+          decoded.role,
+          decoded.sub,
+        );
+      }
       this.addClientToUser(client.data.userId, client.id);
+      this.userService.updateUserStatus(client.data.userId, UserStatus.Online);
+      this.logger.log(`Client disconnected: ${client.id}--------------->`);
     } catch (error) {
-      this.logger.error(`Authentication error: ${error.message}`);
+      this.logger.error(`Authentication error: ${error.message}--------------->`);
       client.disconnect();
     }
   }
 
   async handleDisconnect(@ConnectedSocket() client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
     this.removeClientFromUser(client.data.userId, client.id);
-    await this.userService.updateUserStatus(client.data.userId, 'offline');
+    await this.userService.updateUserStatus(client.data.userId, UserStatus.Offline);
+    this.logger.log(`Client disconnected: ${client.id}--------------->`);
   }
 
   @SubscribeMessage('joinRoom')
   async joinRoom(@MessageBody() data: { room: string }, @ConnectedSocket() client: Socket) {
     try {
       client.join(data.room);
-      this.server.to(data.room).emit('notification', `User ${client.data.email} has joined the room ${data.room}`);
+      this.server.to(data.room).emit('notification', `User ${client.data.email} has joined the room ${data.room}--------------->`);
+      this.logger.log(`User ${client.data.email} joined room ${data.room}--------------->`);
     } catch (error) {
-      this.logger.error(`Error joining room: ${error.message}`);
+      this.logger.error(`Error joining room: ${error.message}--------------->`);
     }
   }
 
@@ -77,9 +88,10 @@ export class WebSocketGate implements OnGatewayConnection, OnGatewayDisconnect, 
   async leaveRoom(@MessageBody() data: { room: string }, @ConnectedSocket() client: Socket) {
     try {
       client.leave(data.room);
-      this.server.to(data.room).emit('notification', `User ${client.data.email} has left the room ${data.room}`);
+      this.server.to(data.room).emit('notification', `User ${client.data.email} has left the room ${data.room}--------------->`);
+      this.logger.log(`User ${client.data.email} left room ${data.room}--------------->`);
     } catch (error) {
-      this.logger.error(`Error leaving room: ${error.message}`);
+      this.logger.error(`Error leaving room: ${error.message}--------------->`);
     }
   }
 
@@ -87,12 +99,13 @@ export class WebSocketGate implements OnGatewayConnection, OnGatewayDisconnect, 
   handleMessage(@MessageBody() data: { room: string; message: string }, @ConnectedSocket() client: Socket) {
     try {
       this.server.to(data.room).emit('message', { user: client.data.email, message: data.message });
+      this.logger.log(`Message from ${client.data.email} in room ${data.room}: ${data.message}--------------->`);
     } catch (error) {
-      this.logger.error(`Error handling message: ${error.message}`);
+      this.logger.error(`Error handling message: ${error.message}--------------->`);
     }
   }
 
-  private addClientToUser(userId: string, clientId: string): void {
+  private  addClientToUser(userId: string, clientId: string): void {
     const clientIds = this.userClientMap.get(userId) || [];
     clientIds.push(clientId);
     this.userClientMap.set(userId, clientIds);
@@ -108,5 +121,3 @@ export class WebSocketGate implements OnGatewayConnection, OnGatewayDisconnect, 
     return this.userClientMap.get(userId) || [];
   }
 }
-
-

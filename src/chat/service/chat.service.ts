@@ -1,10 +1,10 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
 import { CreateConversationDto, CreateMessageDto, UpdateMessageDto, UserDto } from '../dtos/chat.dto';
 import { Conversation } from 'src/conversation/entities/conversation.entity';
 import { Message } from 'src/messages/entities/message.entity';
-import { User } from 'src/users/entities/user.entity';
+import { User, UserRole } from 'src/users/entities/user.entity';
 import {
   ApiForbiddenResponse,
   ApiNotFoundResponse,
@@ -13,10 +13,14 @@ import {
   ApiExtraModels,
   ApiInternalServerErrorResponse,
 } from '@nestjs/swagger';
+import { ApiResponse } from 'src/globals/responses';
+import { API_STATUS } from 'src/globals/enums';
+
+
 
 @ApiTags('Chat')
 @Injectable()
-@ApiExtraModels(CreateConversationDto, CreateMessageDto, UpdateMessageDto, UserDto, Conversation, Message, User)
+@ApiExtraModels(CreateConversationDto, CreateMessageDto, UpdateMessageDto, UserDto, Conversation, Message, User, ApiResponse)
 export class ChatService {
   constructor(
     @InjectRepository(Conversation)
@@ -32,59 +36,79 @@ export class ChatService {
    * @param participants DTO containing participants.
    * @returns The newly created conversation.
    */
-  @ApiOkResponse({ description: 'Successfully created conversation', type: Conversation })
-  @ApiNotFoundResponse({ description: 'One or more participants not found.' })
-  @ApiForbiddenResponse({ description: 'Failed to create conversation. Duplicate participants found.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async createConversation(participants: UserDto[]): Promise<Conversation> {
-    // Check for duplicate participants
-    const uniqueParticipants = new Set(participants.map(participant => participant.userId));
-    if (uniqueParticipants.size !== participants.length) {
-      throw new ForbiddenException('Failed to create conversation. Duplicate participants found.');
-    }
-
+  @ApiOkResponse({ description: 'Successfully created conversation', type: ApiResponse<Conversation> })
+  @ApiNotFoundResponse({ description: 'One or more participants not found.', type: ApiResponse })
+  @ApiForbiddenResponse({ description: 'Failed to create conversation. Duplicate participants found.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async createConversation(participants: UserDto[]): Promise<ApiResponse<Conversation>> {
     try {
-      // Retrieve or create participants based on the provided UserDto objects
-      const participantsEntities = await Promise.all(
-        participants.map(async ({ userId, email, role }) => {
-          let user = await this.userRepository.findOne({ where: { userId } });
-          if (!user) {
-            user = this.userRepository.create({ userId, email, role });
-            await this.userRepository.save(user);
-          }
-          return user;
-        }),
-      );
+      const uniqueParticipants = new Set(participants.map(participant => participant.userId));
+      if (uniqueParticipants.size !== participants.length) {
+        throw new ForbiddenException({
+          status: API_STATUS.FAILURE,
+          message: 'Failed to create conversation. Duplicate participants found.',
+        });
+      }
+
+      const existingConversation = await this.findConversationByParticipants(Array.from(uniqueParticipants));
+      if (existingConversation) {
+        return {
+          status: API_STATUS.SUCCESS,
+          message: 'Successfully retrieved conversation',
+          data: existingConversation,
+        };
+      }
+
+      const participantsEntities = await this.createOrUpdateParticipants(participants);
 
       const conversation = new Conversation();
       conversation.participants = participantsEntities;
-      return this.conversationRepository.save(conversation);
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully created conversation',
+        data: await this.conversationRepository.save(conversation),
+      };
     } catch (error) {
-      if (error instanceof QueryFailedError && error.message.includes('Duplicate entry')) {
-        // Handle duplicate entry error
-        throw new ForbiddenException('Failed to create conversation. Duplicate entry error.');
+      if (error instanceof BadRequestException) {
+        throw error;
       }
-      throw new ForbiddenException('Failed to create conversation. Internal server error.');
+      if (error instanceof QueryFailedError && error.message.includes('Duplicate entry')) {
+        throw new ForbiddenException({
+          status: API_STATUS.FAILURE,
+          message: 'Failed to create conversation. Duplicate entry error.',
+        });
+      }
+      throw new ForbiddenException({
+        status: API_STATUS.FAILURE,
+        message: 'Failed to create conversation. Internal server error.',
+      });
     }
   }
-  
 
   /**
    * Get messages from a specific conversation.
    * @param conversationId ID of the conversation.
    * @returns List of messages in the conversation.
    */
-  @ApiOkResponse({ description: 'Successfully retrieved messages', type: [Message] })
-  @ApiNotFoundResponse({ description: 'Conversation not found.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async getMessages(conversationId: string): Promise<Message[]> {
+  @ApiOkResponse({ description: 'Successfully retrieved messages', type: ApiResponse<[Message]> })
+  @ApiNotFoundResponse({ description: 'Conversation not found.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async getMessages(conversationId: string): Promise<ApiResponse<Message[]>> {
     try {
-      return this.messageRepository.find({
+      const data = await this.messageRepository.find({
         where: { conversation: { id: conversationId } },
         relations: ['conversation', 'sender'],
       });
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully retrieved messages',
+        data: data,
+      };
     } catch (error) {
-      throw new NotFoundException('Conversation not found.');
+      throw new NotFoundException({
+        status: API_STATUS.FAILURE,
+        message: 'Conversation not found.',
+      });
     }
   }
 
@@ -95,29 +119,40 @@ export class ChatService {
    * @param createMessageDto DTO containing message content.
    * @returns The newly created message.
    */
-  @ApiOkResponse({ description: 'Successfully created message', type: Message })
-  @ApiNotFoundResponse({ description: 'Conversation or sender not found.' })
-  @ApiForbiddenResponse({ description: 'Sender is not a participant in the conversation.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async sendMessage(conversationId: string, senderId: string, content: string): Promise<Message> {
+  @ApiOkResponse({ description: 'Successfully created message', type: ApiResponse<Message> })
+  @ApiNotFoundResponse({ description: 'Conversation or sender not found.', type: ApiResponse })
+  @ApiForbiddenResponse({ description: 'Sender is not a participant in the conversation.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async sendMessage(conversationId: string, senderId: string, content: string): Promise<ApiResponse<Message>> {
     try {
       const conversation = await this.conversationRepository.findOne({ where: { id: conversationId } });
       const sender = await this.userRepository.findOne({ where: { userId: senderId } });
 
       if (!conversation || !sender) {
-        throw new NotFoundException('Conversation or sender not found.');
+        throw new NotFoundException({
+          status: API_STATUS.FAILURE,
+          message: 'Conversation or sender not found.',
+        });
       }
 
       const message = new Message();
-      message.conversation = conversation; // Assign the conversation entity
-      message.sender = sender; // Assign the sender (user) entity
+      message.conversation = conversation;
+      message.sender = sender;
       message.content = content;
-      return this.messageRepository.save(message);
+
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully created message',
+        data: await this.messageRepository.save(message),
+      };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new ForbiddenException('Failed to send message.');
+      throw new ForbiddenException({
+        status: API_STATUS.FAILURE,
+        message: 'Failed to send message.',
+      });
     }
   }
 
@@ -127,22 +162,33 @@ export class ChatService {
    * @param updateMessageDto DTO containing updated message content.
    * @returns The updated message.
    */
-  @ApiOkResponse({ description: 'Successfully updated message', type: Message })
-  @ApiNotFoundResponse({ description: 'Message not found.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async updateMessage(messageId: string, updateMessageDto: UpdateMessageDto): Promise<Message> {
+  @ApiOkResponse({ description: 'Successfully updated message', type: ApiResponse<Message> })
+  @ApiNotFoundResponse({ description: 'Message not found.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async updateMessage(messageId: string, updateMessageDto: UpdateMessageDto): Promise<ApiResponse<Message>> {
     try {
       const message = await this.messageRepository.findOne({
         where: { id: messageId },
       });
       if (!message) {
-        throw new NotFoundException('Message not found.');
+        throw new NotFoundException({
+          status: API_STATUS.FAILURE,
+          message: 'Message not found.',
+        });
       }
 
       Object.assign(message, updateMessageDto);
-      return this.messageRepository.save(message);
+
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully updated message',
+        data: await this.messageRepository.save(message),
+      };
     } catch (error) {
-      throw new NotFoundException('Message not found.');
+      throw new NotFoundException({
+        status: API_STATUS.FAILURE,
+        message: 'Message not found.',
+      });
     }
   }
 
@@ -151,22 +197,33 @@ export class ChatService {
    * @param messageId ID of the message.
    * @returns The deleted message.
    */
-  @ApiOkResponse({ description: 'Successfully deleted message', type: Message })
-  @ApiNotFoundResponse({ description: 'Message not found.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async deleteMessage(messageId: string): Promise<Message> {
+  @ApiOkResponse({ description: 'Successfully deleted message', type: ApiResponse<Message> })
+  @ApiNotFoundResponse({ description: 'Message not found.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async deleteMessage(messageId: string): Promise<ApiResponse<Message>> {
     try {
       const message = await this.messageRepository.findOne({
         where: { id: messageId },
       });
       if (!message) {
-        throw new NotFoundException('Message not found.');
+        throw new NotFoundException({
+          status: API_STATUS.FAILURE,
+          message: 'Message not found.',
+        });
       }
 
       await this.messageRepository.remove(message);
-      return message;
+
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully deleted message',
+        data: message,
+      };
     } catch (error) {
-      throw new NotFoundException('Message not found.');
+      throw new NotFoundException({
+        status: API_STATUS.FAILURE,
+        message: 'Message not found.',
+      });
     }
   }
 
@@ -175,18 +232,27 @@ export class ChatService {
    * @param userId ID of the user.
    * @returns List of conversations for the user.
    */
-  @ApiOkResponse({ description: 'Successfully retrieved conversations', type: [Conversation] })
-  @ApiNotFoundResponse({ description: 'User not found.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async getConversations(userId: string): Promise<Conversation[]> {
+  @ApiOkResponse({ description: 'Successfully retrieved conversations', type: ApiResponse<[Conversation]> })
+  @ApiNotFoundResponse({ description: 'User not found.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async getConversations(userId: string): Promise<ApiResponse<Conversation[]>> {
     try {
-      return this.conversationRepository
+      const conversations = await this.conversationRepository
         .createQueryBuilder('conversation')
         .leftJoin('conversation.participants', 'user')
         .where('user.userId = :userId', { userId })
         .getMany();
+
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully retrieved conversations',
+        data: conversations,
+      };
     } catch (error) {
-      throw new NotFoundException('User not found.');
+      throw new NotFoundException({
+        status: API_STATUS.FAILURE,
+        message: 'User not found.',
+      });
     }
   }
 
@@ -195,14 +261,22 @@ export class ChatService {
    * @param conversationId ID of the conversation.
    * @returns List of messages in the conversation.
    */
-  @ApiOkResponse({ description: 'Successfully retrieved conversation history', type: [Message] })
-  @ApiNotFoundResponse({ description: 'Conversation not found.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async getConversationHistory(conversationId: string): Promise<Message[]> {
+  @ApiOkResponse({ description: 'Successfully retrieved conversation history', type: ApiResponse<[Message]> })
+  @ApiNotFoundResponse({ description: 'Conversation not found.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async getConversationHistory(conversationId: string): Promise<ApiResponse<Message[]>> {
     try {
-      return this.getMessagesByConversation(conversationId);
+      const data = await this.getMessagesByConversation(conversationId);
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully retrieved conversation history',
+        data: data.data,
+      };
     } catch (error) {
-      throw new NotFoundException('Conversation not found.');
+      throw new NotFoundException({
+        status: API_STATUS.FAILURE,
+        message: 'Conversation not found.',
+      });
     }
   }
 
@@ -211,17 +285,57 @@ export class ChatService {
    * @param conversationId ID of the conversation.
    * @returns List of messages in the conversation.
    */
-  @ApiOkResponse({ description: 'Successfully retrieved messages', type: [Message] })
-  @ApiNotFoundResponse({ description: 'Conversation not found.' })
-  @ApiInternalServerErrorResponse({ description: 'Internal server error.' })
-  async getMessagesByConversation(conversationId: string): Promise<Message[]> {
+  @ApiOkResponse({ description: 'Successfully retrieved messages', type: ApiResponse<[Message]> })
+  @ApiNotFoundResponse({ description: 'Conversation not found.', type: ApiResponse })
+  @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
+  async getMessagesByConversation(conversationId: string): Promise<ApiResponse<Message[]>> {
     try {
-      return this.messageRepository.find({
+      const data = await this.messageRepository.find({
         where: { conversation: { id: conversationId } },
       });
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully retrieved messages',
+        data: data,
+      };
     } catch (error) {
-      throw new NotFoundException('Conversation not found.');
+      throw new NotFoundException({
+        status: API_STATUS.FAILURE,
+        message: 'Conversation not found.',
+      });
     }
   }
 
+  private async findConversationByParticipants(participantIds: string[]): Promise<Conversation | undefined> {
+    const conversations = await this.conversationRepository
+      .createQueryBuilder('conversation')
+      .leftJoinAndSelect('conversation.participants', 'participant')
+      .where('participant.userId IN (:...participantIds)', { participantIds })
+      .getMany();
+
+    return conversations.find(
+      convo =>
+        convo.participants.length === participantIds.length &&
+        convo.participants.every(participant => participantIds.includes(participant.userId)),
+    );
+  }
+
+  private async createOrUpdateParticipants(participants: UserDto[]): Promise<User[]> {
+    return Promise.all(
+      participants.map(async ({ userId, email, role }) => {
+        let user = await this.userRepository.findOne({ where: { userId } });
+
+        const roleValue = role as UserRole;
+
+        if (!user) {
+          user = this.userRepository.create({ userId, email, role: roleValue });
+        } else if (user.role !== roleValue) {
+          throw new BadRequestException(`User with ID ${userId} already exists with a different role.`);
+        }
+
+        await this.userRepository.save(user);
+        return user;
+      }),
+    );
+  }
 }
