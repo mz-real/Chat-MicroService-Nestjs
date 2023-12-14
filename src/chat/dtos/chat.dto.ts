@@ -32,18 +32,6 @@ export class UserDto {
   userId: string;
 }
 
-export class CreateConversationDto {
-  @IsArray()
-  @IsNotEmpty()
-  @ValidateNested({ each: true })
-  @Type(() => UserDto)
-  @ApiProperty({
-    description: 'Array of participant users',
-    required: true,
-    type: [UserDto],
-  })
-  participants: UserDto[];
-}
 
 export class CreateMessageDto {
   @IsString()

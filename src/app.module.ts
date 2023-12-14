@@ -9,6 +9,7 @@ import { DB_TYPE } from './globals/enums';
 import { WebSocketModule } from './websocket/websocket.module';
 import { UserModule } from './user/user.module';
 import { WebSocketGate } from './websocket/websocket.gateway';
+import { HttpService } from './http/http.service';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { WebSocketGate } from './websocket/websocket.gateway';
         retryDelay: 3000,
         autoLoadEntities: true,
         synchronize: true,
+        // dropSchema: true,
       }),
       inject: [ConfigService],
     }),
@@ -38,7 +40,7 @@ import { WebSocketGate } from './websocket/websocket.gateway';
     UserModule,
   ],
   controllers: [AppController],
-  providers: [AppService, WebSocketGate],
+  providers: [AppService, WebSocketGate, HttpService],
   exports: [WebSocketGate]
 })
 export class AppModule {}

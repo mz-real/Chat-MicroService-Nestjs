@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth, ApiBody, ApiOkResponse, ApiNotFoundResponse, Ap
 import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
 import { ChatService } from '../service/chat.service';
-import { CreateConversationDto, CreateMessageDto, UpdateMessageDto, UserDto } from '../dtos/chat.dto';
+import { CreateMessageDto, UpdateMessageDto, UserDto } from '../dtos/chat.dto';
 
 @UseGuards(AuthGuard('jwt'))
 @ApiTags('Chat')
@@ -14,20 +14,16 @@ export class ChatController {
 
   @Post('conversations')
   @ApiOperation({ summary: 'Create a new conversation' })
-  @ApiBody({ type: CreateConversationDto, description: 'DTO for creating a conversation' })
   @ApiOkResponse({ status: HttpStatus.CREATED, description: 'Conversation created successfully', type: UserDto })
   async createConversation(
-    @Body(ValidationPipe) createConversationDto: CreateConversationDto,
     @Req() req: Request,
   ) {
     const userIdFromJwt = req.user['userId'];
     const emailFromJwt = req.user['email'];
     const roleFromJwt = req.user['role'];
 
-    const participantsWithJwtUser: UserDto[] = [
-      { email: emailFromJwt, role: roleFromJwt, userId: userIdFromJwt },
-      ...createConversationDto.participants,
-    ];
+    const participantsWithJwtUser: UserDto = 
+      { email: emailFromJwt, role: roleFromJwt, userId: userIdFromJwt }
 
     return this.chatService.createConversation(participantsWithJwtUser);
   }

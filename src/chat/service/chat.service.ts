@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
-import { CreateConversationDto, CreateMessageDto, UpdateMessageDto, UserDto } from '../dtos/chat.dto';
+import { CreateMessageDto, UpdateMessageDto, UserDto } from '../dtos/chat.dto';
 import { Conversation } from 'src/conversation/entities/conversation.entity';
 import { Message } from 'src/messages/entities/message.entity';
 import { User, UserRole } from 'src/users/entities/user.entity';
@@ -15,13 +15,17 @@ import {
 } from '@nestjs/swagger';
 import { ApiResponse } from 'src/globals/responses';
 import { API_STATUS } from 'src/globals/enums';
+import { v4 as uuidv4 } from 'uuid';
+import { HttpService } from 'src/http/http.service';
+import { Notification } from 'src/notifications/notification.entity/notification.entity';
 
 
 
 @ApiTags('Chat')
 @Injectable()
-@ApiExtraModels(CreateConversationDto, CreateMessageDto, UpdateMessageDto, UserDto, Conversation, Message, User, ApiResponse)
+@ApiExtraModels(CreateMessageDto, UpdateMessageDto, UserDto, Conversation, Message, User, ApiResponse)
 export class ChatService {
+
   constructor(
     @InjectRepository(Conversation)
     private conversationRepository: Repository<Conversation>,
@@ -29,6 +33,9 @@ export class ChatService {
     private messageRepository: Repository<Message>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Notification)
+    private notificationRepository: Repository<Notification>,
+    private httpService: HttpService,
   ) {}
 
   /**
@@ -40,17 +47,9 @@ export class ChatService {
   @ApiNotFoundResponse({ description: 'One or more participants not found.', type: ApiResponse })
   @ApiForbiddenResponse({ description: 'Failed to create conversation. Duplicate participants found.', type: ApiResponse })
   @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
-  async createConversation(participants: UserDto[]): Promise<ApiResponse<Conversation>> {
+  async createConversation(user: UserDto): Promise<ApiResponse<Conversation>> {
     try {
-      const uniqueParticipants = new Set(participants.map(participant => participant.userId));
-      if (uniqueParticipants.size !== participants.length) {
-        throw new ForbiddenException({
-          status: API_STATUS.FAILURE,
-          message: 'Failed to create conversation. Duplicate participants found.',
-        });
-      }
-
-      const existingConversation = await this.findConversationByParticipants(Array.from(uniqueParticipants));
+      const existingConversation = await this.findConversationByParticipants(Array.from([user.userId]));
       if (existingConversation) {
         return {
           status: API_STATUS.SUCCESS,
@@ -58,10 +57,16 @@ export class ChatService {
           data: existingConversation,
         };
       }
+      const ticketId = uuidv4();
+      console.log("🚀 ~ file: chat.service.ts:50 ~ ChatService ~ createConversation ~ ticketId:", ticketId)
+      const staffUser = await this.httpService.post<any>(`auth/assign_ticket/${ticketId}`);
+      const participants = [user,{email: staffUser.user.email, userId: staffUser.user.id, role: UserRole.Staff}]
+      console.log("🚀 ~ file: chat.service.ts:52 ~ ChatService ~ createConversation ~ staffUser:", staffUser)
 
       const participantsEntities = await this.createOrUpdateParticipants(participants);
 
       const conversation = new Conversation();
+      conversation.ticketId = ticketId;
       conversation.participants = participantsEntities;
       return {
         status: API_STATUS.SUCCESS,
@@ -69,6 +74,10 @@ export class ChatService {
         data: await this.conversationRepository.save(conversation),
       };
     } catch (error) {
+      console.log("🚀 ~ file: chat.service.ts:73 ~ ChatService ~ createConversation ~ error:", error)
+      if (error instanceof ForbiddenException) {
+        throw error;
+      }
       if (error instanceof BadRequestException) {
         throw error;
       }
@@ -80,7 +89,7 @@ export class ChatService {
       }
       throw new ForbiddenException({
         status: API_STATUS.FAILURE,
-        message: 'Failed to create conversation. Internal server error.',
+        message: error.message,
       });
     }
   }
@@ -306,6 +315,13 @@ export class ChatService {
     }
   }
 
+  async findConversationByTicketId(ticketId: string): Promise<Conversation | undefined> {
+    return await this.conversationRepository.findOne({
+      where: { ticketId },
+      relations: ['participants'],
+    });
+  }
+
   private async findConversationByParticipants(participantIds: string[]): Promise<Conversation | undefined> {
     const conversations = await this.conversationRepository
       .createQueryBuilder('conversation')
@@ -318,6 +334,31 @@ export class ChatService {
         convo.participants.length === participantIds.length &&
         convo.participants.every(participant => participantIds.includes(participant.userId)),
     );
+  }
+
+  async getStaffMembersByTicketId(ticketId: string): Promise<User[]> {
+    const conversation = await this.conversationRepository.findOne({
+      where: { ticketId },
+      relations: ['participants'],
+    });
+
+    if (!conversation) {
+      throw new Error(`Conversation with ticket ID ${ticketId} not found.`);
+    }
+    const staffMembers = conversation.participants.filter(participant => participant.role === UserRole.Staff);
+
+    return staffMembers;
+  }
+
+  async acknowledgeNotification(notificationId: number, userId: string): Promise<Notification> {
+    const notification = await this.notificationRepository.findOne({ where: { id: notificationId, user: { id: userId } } });
+
+    if (!notification) {
+      throw new Error(`Notification not found or does not belong to the user.`);
+    }
+
+    notification.isAcknowledged = true;
+    return this.notificationRepository.save(notification);
   }
 
   private async createOrUpdateParticipants(participants: UserDto[]): Promise<User[]> {

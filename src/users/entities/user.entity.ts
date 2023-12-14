@@ -1,4 +1,5 @@
-import { Column, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import { Notification } from 'src/notifications/notification.entity/notification.entity';
+import { Column, Entity, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 
 export enum UserRole {
   Client = 'client',
@@ -34,4 +35,7 @@ export class User {
     default: UserStatus.Offline
   })
   status: UserStatus;
+  
+  @OneToMany(() => Notification, notification => notification.user, { nullable: true })
+  notifications?: Notification[];
 }
