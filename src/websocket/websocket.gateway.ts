@@ -9,7 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import * as jwt from 'jsonwebtoken';
-import { Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Logger, OnModuleInit } from '@nestjs/common';
 import { UserService } from 'src/user/user.service';
 import { ChatService } from 'src/chat/service/chat.service';
 import { ConfigService } from '@nestjs/config';
@@ -36,12 +36,12 @@ export class WebSocketGate
 
   private userClientMap: Map<string, string[]> = new Map();
   private logger: Logger;
-  private httpService: HttpService;
 
   constructor(
     private userService: UserService,
     private chatService: ChatService,
     private configService: ConfigService,
+    @Inject(HttpService) private httpService: HttpService,
   ) {}
 
   onModuleInit() {
@@ -113,16 +113,15 @@ export class WebSocketGate
     @ConnectedSocket() client: Socket,
   ) {
     try {
-      const userId = client.data.userId;
       const ticketId = data.ticketId;
       
-      const assignedUserResponse = await this.httpService.get<any>(`/auth/ticket-user/${ticketId}`);
-      if (assignedUserResponse && assignedUserResponse.userId === userId) {
+      const assignedUserResponse = await this.httpService.get<any>(`auth/ticket-user/${ticketId}`);
+      if (assignedUserResponse && assignedUserResponse.id) {
         client.join(ticketId);
         this.server.to(ticketId).emit('notification', `Staff member joined the room for ticket ${ticketId}`);
-        this.logger.log(`Staff member ${userId} joined room for ticket ${ticketId}`);
+        this.logger.log(`Staff member ${assignedUserResponse.id} joined room for ticket ${ticketId}`);
       } else {
-        this.logger.error(`Staff member ${userId} is not assigned to ticket ${ticketId}`);
+        this.logger.error(`Staff member is not assigned to ticket ${ticketId}`);
       }
     } catch (error) {
       this.logger.error(`Error in handleJoinRoom: ${error.message}`);
