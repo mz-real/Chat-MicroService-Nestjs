@@ -2,6 +2,8 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { User, UserRole, UserStatus } from 'src/users/entities/user.entity';
 import { Repository } from 'typeorm';
+import { ApiResponse } from 'src/globals/responses';
+import { API_STATUS } from 'src/globals/enums'; // Replace with the correct path
 
 @Injectable()
 export class UserService {
@@ -49,11 +51,28 @@ export class UserService {
     }
   }
 
-  async findUserByEmail(email: string): Promise<User | undefined> {
+  async getUserStatus(userId: string): Promise<ApiResponse<{ status: UserStatus }>> {
     try {
-      return await this.userRepository.findOne({ where: { email } });
+      const user = await this.findUserById(userId);
+
+      if (!user) {
+        throw new NotFoundException(`User not found with ID: ${userId}`);
+      }
+
+      return {
+        status: API_STATUS.SUCCESS,
+        message: 'Successfully retrieved user status',
+        data: { status: user.status },
+      };
     } catch (error) {
-      throw new BadRequestException('Failed to find user by email. Internal server error.');
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+
+      throw new BadRequestException({
+        status: API_STATUS.FAILURE,
+        message: 'Failed to get user status. Internal server error.',
+      });
     }
   }
 

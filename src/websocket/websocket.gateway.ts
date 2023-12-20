@@ -16,6 +16,7 @@ import { ConfigService } from '@nestjs/config';
 import { UserRole, UserStatus } from 'src/users/entities/user.entity';
 import { API_STATUS } from 'src/globals/enums';
 import { HttpService } from 'src/http/http.service';
+import { NotificationService } from 'src/notifications/notifications.service';
 
 interface JwtPayload {
   sub: string;
@@ -39,9 +40,10 @@ export class WebSocketGate
 
   constructor(
     private userService: UserService,
-    private chatService: ChatService,
+    @Inject(ChatService) private readonly chatService: ChatService,
     private configService: ConfigService,
     @Inject(HttpService) private httpService: HttpService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   onModuleInit() {
@@ -79,7 +81,8 @@ export class WebSocketGate
           if (createConversationResponse.status === API_STATUS.SUCCESS) {
             const room = createConversationResponse.data.ticketId;
             client.join(room);
-            this.server.to(createConversationResponse.data.ticketId).emit('notification', `Client member joined the room for ticket ${createConversationResponse.data.ticketId}`);
+            this.sendNotificationToOtherParticipants(client.data.userId, room, 'Client joined the conversation');
+            this.server.to(room).emit('notification', `Client member joined the room for ticket ${createConversationResponse.data.ticketId}`);
             this.logger.log(`New conversation created and client joined room: ${room}`);
           } else {
             this.logger.error(`Failed to create conversation for client: ${user.email}`);
@@ -88,6 +91,7 @@ export class WebSocketGate
           const room = existingConversation.data[0].ticketId;
           client.join(room);
           this.logger.log(`Existing conversation found, client joined room: ${room}`);
+          this.sendNotificationToOtherParticipants(client.data.userId, room, 'Client joined the conversation');
         }
       }
   
@@ -106,7 +110,7 @@ export class WebSocketGate
     );
     this.logger.log(`Client disconnected: ${client.id}--------------->`);
   }
-
+  
   @SubscribeMessage('joinRoom')
   async handleJoinRoom(
     @MessageBody() data: { ticketId: string },
@@ -118,7 +122,7 @@ export class WebSocketGate
       const assignedUserResponse = await this.httpService.get<any>(`auth/ticket-user/${ticketId}`);
       if (assignedUserResponse && assignedUserResponse.id) {
         client.join(ticketId);
-        this.server.to(ticketId).emit('notification', `Staff member joined the room for ticket ${ticketId}`);
+        this.sendNotificationToOtherParticipants(client.data.userId, ticketId, 'Staff member joined the conversation');
         this.logger.log(`Staff member ${assignedUserResponse.id} joined room for ticket ${ticketId}`);
       } else {
         this.logger.error(`Staff member is not assigned to ticket ${ticketId}`);
@@ -168,11 +172,7 @@ export class WebSocketGate
       const savedMessage = await this.chatService.sendMessage(conversation.id, userId, messageContent);
 
       if (savedMessage.status === API_STATUS.SUCCESS) {
-        this.server.to(ticketId).emit('message', {
-          sender: userId,
-          content: messageContent,
-          createdAt: savedMessage.data.createdAt,
-        });
+        this.sendNotificationToOtherParticipants(userId, ticketId, `New Message sent by ${userId}: ${messageContent}`, savedMessage?.data);
         this.logger.log(`Message sent in room ${ticketId} by ${userId}: ${messageContent}`);
       } else {
         this.logger.error(`Failed to save message for room ${ticketId} by ${userId}`);
@@ -180,22 +180,6 @@ export class WebSocketGate
     } catch (error) {
       this.logger.error(`Error handling message: ${error.message}`);
     }
-  }
-
-  notifyStaffOfNewMessageOrAssignment(ticketId: string, message: string): void {
-    this.chatService.getStaffMembersByTicketId(ticketId).then(staffMembers => {
-      staffMembers.forEach(staffMember => {
-        const clientIds = this.getUserClientIds(staffMember.userId);
-        clientIds.forEach(clientId => {
-          this.server.to(clientId).emit('newAssignment', {
-            ticketId,
-            message
-          });
-        });
-      });
-    }).catch(error => {
-      this.logger.error(`Error notifying staff: ${error.message}`);
-    });
   }
 
   private addClientToUser(userId: string, clientId: string): void {
@@ -218,4 +202,37 @@ export class WebSocketGate
   getUserClientIds(userId: string): string[] {
     return this.userClientMap.get(userId) || [];
   }
+
+  private async sendNotificationToOtherParticipants(senderId: string, ticketId: string, message: string, isMessage?: any) {
+    try {
+      const conversation = await this.chatService.findConversationByTicketId(ticketId);
+      if (conversation) {
+        const participantIds = conversation.participants.map(participant => participant.userId);
+        const otherParticipants = participantIds.filter(id => id !== senderId);
+  
+        for (const userId of otherParticipants) {
+          const clientIds = this.getUserClientIds(userId);
+          console.log("🚀 ~ file: websocket.gateway.ts:215 ~ sendNotificationToOtherParticipants ~ clientIds:", clientIds)
+  
+          try {
+            for (const clientId of clientIds) {
+                const notification = await this.notificationService.createNotification(userId, ticketId, message);
+                this.server.to(clientId).emit('notification', notification.data);
+                if (isMessage && userId === senderId) {
+                  this.server.to(clientId).emit('message', isMessage);
+                }
+            }
+          } catch (error) {
+            this.logger.error(`Error creating notification for user ${userId}: ${error.message}`);
+          }
+        }
+      }
+    } catch (error) {
+      console.log("🚀 ~ file: websocket.gateway.ts:233 ~ sendNotificationToOtherParticipants ~ error:", error)
+      this.logger.error(`Error retrieving conversation for ticket ${ticketId}: ${error.message}`);
+    }
+  }
+  
+  
+
 }

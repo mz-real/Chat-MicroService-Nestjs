@@ -1,23 +1,24 @@
+import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import { Conversation } from 'src/conversation/entities/conversation.entity';
 import { User } from 'src/users/entities/user.entity';
-import { Entity, Column, PrimaryGeneratedColumn, ManyToOne, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 
 @Entity()
 export class Notification {
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-  @ManyToOne(() => User, user => user.notifications)
-  user: User;
+  @ManyToOne(() => Conversation, conversation => conversation.notifications)
+  conversation: Conversation;
 
   @Column()
   content: string;
 
   @Column({ default: false })
-  isAcknowledged: boolean;
+  acknowledged: boolean;
 
-  @CreateDateColumn({ type: 'timestamp' })
-  createdAt: Date;
+  @Column({ default: false })
+  dismissed: boolean;
 
-  @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt: Date;
+  @ManyToOne(() => User, user => user.notifications) 
+  user: User; 
 }

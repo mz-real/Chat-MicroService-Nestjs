@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, InternalServerErrorException, Query } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { QueryFailedError, Repository } from 'typeorm';
-import { CreateMessageDto, UpdateMessageDto, UserDto } from '../dtos/chat.dto';
+import { CreateMessageDto, PaginationDto, UpdateMessageDto, UserDto } from '../dtos/chat.dto';
 import { Conversation } from 'src/conversation/entities/conversation.entity';
 import { Message } from 'src/messages/entities/message.entity';
 import { User, UserRole } from 'src/users/entities/user.entity';
@@ -58,10 +58,8 @@ export class ChatService {
         };
       }
       const ticketId = uuidv4();
-      console.log("🚀 ~ file: chat.service.ts:50 ~ ChatService ~ createConversation ~ ticketId:", ticketId)
       const staffUser = await this.httpService.post<any>(`auth/assign_ticket/${ticketId}`);
       const participants = [user,{email: staffUser.user.email, userId: staffUser.user.id, role: UserRole.Staff}]
-      console.log("🚀 ~ file: chat.service.ts:52 ~ ChatService ~ createConversation ~ staffUser:", staffUser)
 
       const participantsEntities = await this.createOrUpdateParticipants(participants);
 
@@ -273,9 +271,14 @@ export class ChatService {
   @ApiOkResponse({ description: 'Successfully retrieved conversation history', type: ApiResponse<[Message]> })
   @ApiNotFoundResponse({ description: 'Conversation not found.', type: ApiResponse })
   @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
-  async getConversationHistory(conversationId: string): Promise<ApiResponse<Message[]>> {
+  async getConversationHistory(
+    conversationId: string,
+    @Query() paginationDto: PaginationDto,
+  ): Promise<ApiResponse<Message[]>> {
     try {
-      const data = await this.getMessagesByConversation(conversationId);
+      const { page = 1, pageSize = 10 } = paginationDto;
+      const data = await this.getMessagesByConversation(conversationId, (page - 1) * pageSize, pageSize);
+  
       return {
         status: API_STATUS.SUCCESS,
         message: 'Successfully retrieved conversation history',
@@ -297,10 +300,12 @@ export class ChatService {
   @ApiOkResponse({ description: 'Successfully retrieved messages', type: ApiResponse<[Message]> })
   @ApiNotFoundResponse({ description: 'Conversation not found.', type: ApiResponse })
   @ApiInternalServerErrorResponse({ description: 'Internal server error.', type: ApiResponse })
-  async getMessagesByConversation(conversationId: string): Promise<ApiResponse<Message[]>> {
+  async getMessagesByConversation(conversationId: string, skip: number, take: number): Promise<ApiResponse<Message[]>> {
     try {
       const data = await this.messageRepository.find({
         where: { conversation: { id: conversationId } },
+        skip,
+        take,
       });
       return {
         status: API_STATUS.SUCCESS,
@@ -348,17 +353,6 @@ export class ChatService {
     const staffMembers = conversation.participants.filter(participant => participant.role === UserRole.Staff);
 
     return staffMembers;
-  }
-
-  async acknowledgeNotification(notificationId: number, userId: string): Promise<Notification> {
-    const notification = await this.notificationRepository.findOne({ where: { id: notificationId, user: { id: userId } } });
-
-    if (!notification) {
-      throw new Error(`Notification not found or does not belong to the user.`);
-    }
-
-    notification.isAcknowledged = true;
-    return this.notificationRepository.save(notification);
   }
 
   private async createOrUpdateParticipants(participants: UserDto[]): Promise<User[]> {

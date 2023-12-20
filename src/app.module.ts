@@ -10,6 +10,7 @@ import { WebSocketModule } from './websocket/websocket.module';
 import { UserModule } from './user/user.module';
 import { WebSocketGate } from './websocket/websocket.gateway';
 import { HttpService } from './http/http.service';
+import { NotificationModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -38,8 +39,9 @@ import { HttpService } from './http/http.service';
     ChatModule,
     WebSocketModule,
     UserModule,
+    NotificationModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController,],
   providers: [AppService, WebSocketGate, HttpService],
   exports: [WebSocketGate]
 })

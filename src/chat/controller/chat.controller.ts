@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req, ValidationPipe, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Put, Delete, UseGuards, Req, ValidationPipe, HttpStatus, Query } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiBody, ApiOkResponse, ApiNotFoundResponse, ApiOperation } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { Request } from 'express';
@@ -73,9 +73,13 @@ export class ChatController {
   }
 
   @Get('conversations/:conversationId/history')
-  @ApiOperation({ summary: 'Get the history of a specific conversation' })
-  @ApiOkResponse({ status: HttpStatus.OK, description: 'List of messages in the conversation', type: [CreateMessageDto] })
-  async getConversationHistory(@Param('conversationId') conversationId: string) {
-    return this.chatService.getConversationHistory(conversationId);
-  }
+@ApiOperation({ summary: 'Get the history of a specific conversation' })
+@ApiOkResponse({ status: HttpStatus.OK, description: 'List of messages in the conversation', type: [CreateMessageDto] })
+async getConversationHistory(
+  @Param('conversationId') conversationId: string,
+  @Query('page') page: number = 1, // Default to page 1 if not provided
+  @Query('pageSize') pageSize: number = 10, // Default to a page size of 10 if not provided
+) {
+  return this.chatService.getConversationHistory(conversationId, { page, pageSize });
+}
 }

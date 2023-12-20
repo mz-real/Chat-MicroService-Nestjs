@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsString, IsNotEmpty, IsOptional, IsArray, IsEmail, IsIn, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsArray, IsEmail, IsIn, ValidateNested, IsNumber, Min } from 'class-validator';
 
 
 export class UserDto {
@@ -51,4 +51,16 @@ export class UpdateMessageDto {
     required: false,
   })
   content?: string;
+}
+
+export class PaginationDto {
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  pageSize?: number;
 }

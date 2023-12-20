@@ -35,7 +35,7 @@ export class User {
     default: UserStatus.Offline
   })
   status: UserStatus;
+  @OneToMany(() => Notification, notification => notification.user, {nullable: true}) 
+  notifications: Notification[];
   
-  @OneToMany(() => Notification, notification => notification.user, { nullable: true })
-  notifications?: Notification[];
 }
