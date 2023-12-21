@@ -17,6 +17,7 @@ import { UserRole, UserStatus } from 'src/users/entities/user.entity';
 import { API_STATUS } from 'src/globals/enums';
 import { HttpService } from 'src/http/http.service';
 import { NotificationService } from 'src/notifications/notifications.service';
+import { Message } from 'src/messages/entities/message.entity';
 
 interface JwtPayload {
   sub: string;
@@ -24,6 +25,13 @@ interface JwtPayload {
   role: string;
   iat: number;
   exp: number;
+}
+
+interface UserConnectionInfo {
+  userId: string;
+  clientId: any;
+  role: UserRole;
+  status: UserStatus;
 }
 
 @WebSocketGateway({
@@ -35,7 +43,7 @@ export class WebSocketGate
   @WebSocketServer()
   server: Server;
 
-  private userClientMap: Map<string, string[]> = new Map();
+  private userConnections: Map<string, UserConnectionInfo> = new Map();
   private logger: Logger;
 
   constructor(
@@ -70,7 +78,7 @@ export class WebSocketGate
           decoded.sub,
         );
       }
-      this.addClientToUser(client.data.userId, client.id);
+      this.addClientToUser(client.data.userId, client.id, decoded.role as UserRole);
       await this.userService.updateUserStatus(client.data.userId, UserStatus.Online);
       this.logger.log(`Client connected: ${client.id}`)
   
@@ -80,9 +88,10 @@ export class WebSocketGate
           const createConversationResponse = await this.chatService.createConversation({userId: user.userId, email: user.email, role: user.role});
           if (createConversationResponse.status === API_STATUS.SUCCESS) {
             const room = createConversationResponse.data.ticketId;
+            await this.notificationService.createNotification(user.userId, room, `New Conversation of user ${user.email}`);
+
             client.join(room);
             this.sendNotificationToOtherParticipants(client.data.userId, room, 'Client joined the conversation');
-            this.server.to(room).emit('notification', `Client member joined the room for ticket ${createConversationResponse.data.ticketId}`);
             this.logger.log(`New conversation created and client joined room: ${room}`);
           } else {
             this.logger.error(`Failed to create conversation for client: ${user.email}`);
@@ -103,7 +112,7 @@ export class WebSocketGate
   
 
   async handleDisconnect(@ConnectedSocket() client: Socket) {
-    this.removeClientFromUser(client.data.userId, client.id);
+    this.removeClientFromUser(client.data.userId);
     await this.userService.updateUserStatus(
       client.data.userId,
       UserStatus.Offline,
@@ -182,16 +191,19 @@ export class WebSocketGate
     }
   }
 
-  private addClientToUser(userId: string, clientId: string): void {
-    const clientIds = this.userClientMap.get(userId) || [];
-    clientIds.push(clientId);
-    this.userClientMap.set(userId, clientIds);
+  private addClientToUser(userId: string, clientId: any, role: UserRole) {
+    const userConnectionInfo: UserConnectionInfo = {
+      userId: userId,
+      clientId: clientId,
+      role: role,
+      status: UserStatus.Online,
+    };
+  
+    this.userConnections.set(String(userId), userConnectionInfo);
   }
-
-  private removeClientFromUser(userId: string, clientId: string): void {
-    const clientIds = this.userClientMap.get(userId) || [];
-    const updatedClientIds = clientIds.filter((id) => id !== clientId);
-    this.userClientMap.set(userId, updatedClientIds);
+  
+  private removeClientFromUser(userId: string) {
+    this.userConnections.delete(userId);
   }
 
   private async isUserInConversation(userId: string, ticketId: string): Promise<boolean> {
@@ -199,28 +211,27 @@ export class WebSocketGate
     return conversation ? conversation.participants.some(p => p.userId === userId) : false;
   }
 
-  getUserClientIds(userId: string): string[] {
-    return this.userClientMap.get(userId) || [];
+  private getUserClientIds(userId: string): any[] {
+    return this.userConnections.get(userId)?.clientId ? [this.userConnections.get(userId).clientId] : [];
   }
 
-  private async sendNotificationToOtherParticipants(senderId: string, ticketId: string, message: string, isMessage?: any) {
+  private async sendNotificationToOtherParticipants(senderId: string, ticketId: string, message: string, isMessage?: Message) {
     try {
       const conversation = await this.chatService.findConversationByTicketId(ticketId);
       if (conversation) {
         const participantIds = conversation.participants.map(participant => participant.userId);
         const otherParticipants = participantIds.filter(id => id !== senderId);
-  
         for (const userId of otherParticipants) {
-          const clientIds = this.getUserClientIds(userId);
-          console.log("🚀 ~ file: websocket.gateway.ts:215 ~ sendNotificationToOtherParticipants ~ clientIds:", clientIds)
-  
+
+          const clientIds = this.getUserClientIds(String(userId));
+          if (isMessage) {
+            await this.notificationService.createNotification(userId, ticketId, `New message Received by => ${isMessage.sender}  Message => ${isMessage.content}`);
+           }
           try {
             for (const clientId of clientIds) {
-                const notification = await this.notificationService.createNotification(userId, ticketId, message);
-                this.server.to(clientId).emit('notification', notification.data);
-                if (isMessage && userId === senderId) {
-                  this.server.to(clientId).emit('message', isMessage);
-                }
+                this.server.to(clientId).emit('notification', message);
+                if(isMessage){
+                this.server.to(clientId).emit('message', `New message Received by => ${isMessage.sender.email}  Message => ${isMessage.content}`);}
             }
           } catch (error) {
             this.logger.error(`Error creating notification for user ${userId}: ${error.message}`);
@@ -228,7 +239,6 @@ export class WebSocketGate
         }
       }
     } catch (error) {
-      console.log("🚀 ~ file: websocket.gateway.ts:233 ~ sendNotificationToOtherParticipants ~ error:", error)
       this.logger.error(`Error retrieving conversation for ticket ${ticketId}: ${error.message}`);
     }
   }

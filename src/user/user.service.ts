@@ -14,14 +14,22 @@ export class UserService {
 
   async createUser(email: string, role: string, userId: string): Promise<User> {
     try {
-      const user = new User();
+      let user = await this.userRepository.findOne({ where: { userId } });
+      
+      if (user) {
+        console.log("User already exists:", user);
+        return user;
+      }
+  
+      user = new User();
       user.email = email;
-      user.role = role as UserRole,
+      user.role = role as UserRole;
       user.userId = userId;
+  
       return await this.userRepository.save(user);
     } catch (error) {
-      if (error.code === '23505') {
-        throw new BadRequestException(`User with ID ${userId} already exists.`);
+      if (error.code === 'ER_DUP_ENTRY') {
+        return await this.userRepository.findOne({ where: { userId } });
       }
       throw new BadRequestException('Failed to create user. Internal server error.');
     }
